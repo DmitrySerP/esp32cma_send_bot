@@ -3,15 +3,14 @@
 #include <UniversalTelegramBot.h>
 #include <ArduinoJson.h>
 #include <WiFiClientSecure.h>
+#include "config.h"
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
 #include "esp_camera.h"
 
 
+
 // Настройки доступа 
-#define WIFI_SSID  "kv_163"
-#define WIFI_PASSWORD  "e3121465"
-#define BOT_TOKEN  "8088905556:AAFE8eiSiVNwXiLMCG2HwUsDCT0oKJoSH5Y"
 #define PIR_PIN 13
 #define DEBOUNCE_TIME 10000
 String CHAT_ID; 
