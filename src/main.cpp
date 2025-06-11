@@ -2,33 +2,37 @@
 #include <WiFi.h>
 #include <UniversalTelegramBot.h>
 #include <ArduinoJson.h>
-#include "esp_camera.h"
 #include <WiFiClientSecure.h>
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
+#include "esp_camera.h"
+
 
 // Настройки доступа 
-#define WIFI_SSID  ""
-#define WIFI_PASSWORD  ""
-#define BOT_TOKEN  ""
+#define WIFI_SSID  "kv_163"
+#define WIFI_PASSWORD  "e3121465"
+#define BOT_TOKEN  "8088905556:AAFE8eiSiVNwXiLMCG2HwUsDCT0oKJoSH5Y"
 #define PIR_PIN 13
 #define DEBOUNCE_TIME 10000
-String CHAT_ID;
+String CHAT_ID; 
+
 // Настройки камеры
-#define PWDN_GPIO_NUM -1
-#define RESET_GPIO_NUM -1
-#define XCLK_GPIO_NUM 0
-#define SIOD_GPIO_NUM 26
-#define SIOC_GPIO_NUM 27
-#define Y9_GPIO_NUM 35
-#define Y8_GPIO_NUM 34
-#define Y7_GPIO_NUM 39
-#define Y6_GPIO_NUM 36
-#define Y5_GPIO_NUM 21
-#define Y4_GPIO_NUM 19
-#define Y3_GPIO_NUM 18
-#define Y2_GPIO_NUM 5
-#define VSYNC_GPIO_NUM 25
-#define HREF_GPIO_NUM 23
-#define PCLK_GPIO_NUM 22
+#define PWDN_GPIO_NUM    32
+#define RESET_GPIO_NUM   -1
+#define XCLK_GPIO_NUM    0
+#define SIOD_GPIO_NUM    26
+#define SIOC_GPIO_NUM    27
+#define Y9_GPIO_NUM      35
+#define Y8_GPIO_NUM      34
+#define Y7_GPIO_NUM      39
+#define Y6_GPIO_NUM      36
+#define Y5_GPIO_NUM      21
+#define Y4_GPIO_NUM      19
+#define Y3_GPIO_NUM      18
+#define Y2_GPIO_NUM      5
+#define VSYNC_GPIO_NUM   25
+#define HREF_GPIO_NUM    23
+#define PCLK_GPIO_NUM    22
 
 // Инициализация клиента Wi-Fi 
 WiFiClientSecure client;
@@ -38,7 +42,47 @@ UniversalTelegramBot bot(BOT_TOKEN, client);
 int lastPirState = LOW;
 unsigned long lastPhotoTime = 0;
 
+// Прототипы функций
+void sendPhoto(String chat_id);
+void sendVideo(String chat_id);
+void readPIR(String chat_id);
+bool moreDataAvailable();
+uint8_t getNextByte();
+uint8_t* getNextBuffer();
+int getNextBufferLen();
+
+// Глобальные переменные для отправки фото
+uint8_t* photoBuffer = nullptr;
+size_t photoSize = 0;
+bool bufferSent = false;
+
+// Callback-функции для sendPhotoByBinary
+bool moreDataAvailable() {
+  return !bufferSent && photoBuffer != nullptr && photoSize > 0;
+}
+
+uint8_t getNextByte() {
+  // Не используется, так как мы отправляем весь буфер
+  return 0;
+}
+
+uint8_t* getNextBuffer() {
+  if (!bufferSent) {
+    bufferSent = true;
+    return photoBuffer;
+  }
+  return nullptr;
+}
+
+int getNextBufferLen() {
+  if (!bufferSent) {
+    return (int)photoSize; // Приведение size_t к int
+  }
+  return 0;
+}
+
 void setup(){
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
   Serial.begin(115200);
   
   // Инициализация датчика PIR
@@ -60,8 +104,8 @@ void setup(){
   config.pin_pclk = PCLK_GPIO_NUM;
   config.pin_vsync = VSYNC_GPIO_NUM;
   config.pin_href = HREF_GPIO_NUM;
-  config.pin_sscb_sda = SIOD_GPIO_NUM;
-  config.pin_sscb_scl = SIOC_GPIO_NUM;
+  config.pin_sccb_sda = SIOD_GPIO_NUM;
+  config.pin_sccb_scl = SIOC_GPIO_NUM;
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
@@ -106,7 +150,7 @@ void setup(){
   Serial.println(WiFi.localIP());
 
   // Отключение проверки сертификата(для тестового использования)
-  client.setInsecure();
+ // client.setInsecure();
 
 }
 
@@ -163,11 +207,27 @@ void sendPhoto(String chat_id) {
     bot.sendMessage(chat_id, "Ошибка захвата фото", "");
     return;
   }
-  bot.sendPhoto(chat_id, fb->buf, fb->len);
-  Serial.println("Фото отправлено");
+
+  // Установка глобальных переменных для callback-функций
+  photoBuffer = fb->buf;
+  photoSize = fb->len;
+  bufferSent = false;
+
+  // Отправка фото через sendPhotoByBinary
+  String response = bot.sendPhotoByBinary(chat_id, "image/jpeg", fb->len, moreDataAvailable, getNextByte, getNextBuffer, getNextBufferLen);
+  if (response.indexOf("\"ok\":true") != -1) {
+    Serial.println("Фото отправлено");
+  } else {
+    Serial.println("Ошибка отправки фото: " + response);
+    bot.sendMessage(chat_id, "Ошибка отправки фото", "");
+  }
+
+  // Очистка
+  photoBuffer = nullptr;
+  photoSize = 0;
+  bufferSent = false;
   esp_camera_fb_return(fb);
 }
-
 // Функция для отправки видео (MJPEG)
 void sendVideo(String chat_id) {
   String mjpeg_url = "http://" + WiFi.localIP().toString() + ":81/stream";
